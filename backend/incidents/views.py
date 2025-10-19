@@ -15,6 +15,8 @@ from .serializers import (
     IncidentUpdateSerializer,
     AssignmentSerializer,
 )
+from .routing_algorithm import IncidentRouter
+from notifications.models import Notification
 
 # Create your views here.
 
@@ -48,22 +50,70 @@ class IncidentTimelineView(generics.ListAPIView):
         return IncidentUpdate.objects.filter(incident_id=incident_id)
 
 
+# class VerifyIncidentView(generics.UpdateAPIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request, incident_id):
+#         try:
+#             incident = Incident.objects.get(id=incident_id)
+#             incident.status = "verified"
+#             incident.verified_at = timezone.now()
+#             incident.verified_by = request.user.authority_profile
+#             incident.save()
+
+#             return Response({"message": "Incident verified"}, status=status.HTTP_200_OK)
+#         except:
+#             return Response(
+#                 {"error": "Failed to verify"}, status=status.HTTP_400_BAD_REQUEST
+#             )
+        
 class VerifyIncidentView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated]
-
+    
     def post(self, request, incident_id):
         try:
             incident = Incident.objects.get(id=incident_id)
-            incident.status = "verified"
-            incident.verified_at = timezone.now()
+            incident.status = 'verified'
             incident.verified_by = request.user.authority_profile
+            incident.verified_at = timezone.now()
+            incident.media_access_level = 'basic'  # Allow media access
             incident.save()
-
-            return Response({"message": "Incident verified"}, status=status.HTTP_200_OK)
+            
+            # Auto-assign after verification
+            auto_assign = request.data.get('auto_assign', True)
+            if auto_assign:
+                router = IncidentRouter()
+                authority, details = router.find_best_authority(incident)
+                
+                if authority:
+                    Assignment.objects.create(
+                        incident=incident,
+                        authority=authority,
+                        assigned_by=request.user,
+                        status='assigned',
+                        distance_km=details['distance_km'],
+                        estimated_arrival_min=details['eta_minutes']
+                    )
+                    
+                    incident.status = 'assigned'
+                    incident.save()
+                    
+                    # Notify authority
+                    Notification.objects.create(
+                        user=authority.user,
+                        notification_type='assignment',
+                        title='New Incident Assignment',
+                        message=f'Verified {incident.incident_type} incident assigned to you',
+                        priority='high' if incident.severity in ['high', 'critical'] else 'medium'
+                    )
+            
+            return Response({
+                'message': 'Incident verified and assigned successfully' if auto_assign else 'Incident verified',
+                'incident_id': str(incident.id),
+                'status': incident.status
+            } , status=status.HTTP_200_OK)
         except:
-            return Response(
-                {"error": "Failed to verify"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Failed to verify'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AssignmentListView(generics.ListAPIView):
@@ -308,7 +358,9 @@ class DownloadMediaView(generics.RetrieveAPIView):
             incident_type = incident.incident_type
             timestamp = incident.created_at.strftime("%Y%m%d_%H%M%S")
             extension = os.path.splitext(file_path)[1]
-            download_filename = f"citifix_{incident_type}_{timestamp}_{media.id}{extension}"
+            download_filename = (
+                f"citifix_{incident_type}_{timestamp}_{media.id}{extension}"
+            )
 
             response = FileResponse(
                 open(file_path, "rb"),
@@ -329,4 +381,232 @@ class DownloadMediaView(generics.RetrieveAPIView):
             return Response(
                 {"error": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class AutoAssignIncidentView(APIView):
+    """
+    Automatically assign incident to best available authority
+    Admin or system can trigger this
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, incident_id):
+        try:
+            incident = Incident.objects.get(id=incident_id)
+
+            # Check if already assigned
+            if Assignment.objects.filter(
+                incident=incident, status__in=["assigned", "en_route", "in_progress"]
+            ).exists():
+                return Response(
+                    {"error": "Incident already has active assignments"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Use routing algorithm
+            router = IncidentRouter()
+
+            # For critical incidents, assign multiple units
+            if incident.severity == "critical":
+                assignments = router.assign_multiple_units(incident, count=2)
+
+                if not assignments:
+                    return Response(
+                        {"error": "No available authorities found"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+                created_assignments = []
+                for authority, details in assignments:
+                    assignment = Assignment.objects.create(
+                        incident=incident,
+                        authority=authority,
+                        assigned_by=request.user,
+                        status="assigned",
+                        distance_km=details["distance_km"],
+                        estimated_arrival_min=details["eta_minutes"],
+                    )
+                    created_assignments.append(assignment)
+
+                    # Create notification for authority
+                    Notification.objects.create(
+                        user=authority.user,
+                        notification_type="assignment",
+                        title="New Critical Incident Assignment",
+                        message=f'You have been assigned to a {incident.incident_type} incident. ETA: {details["eta_minutes"]} minutes',
+                        priority="high",
+                    )
+
+                    # Create incident update
+                    IncidentUpdate.objects.create(
+                        incident=incident,
+                        updated_by=request.user,
+                        update_type="assignment",
+                        old_status="",
+                        new_status="",
+                        message=f'Assigned to {authority.organization_name} (Distance: {details["distance_km"]}km, ETA: {details["eta_minutes"]}min)',
+                    )
+
+                # Update incident status
+                incident.status = "assigned"
+                incident.save()
+
+                return Response(
+                    {
+                        "message": f"{len(created_assignments)} authorities assigned successfully",
+                        "assignments": [
+                            {
+                                "id": str(a.id),
+                                "authority": a.authority.organization_name,
+                                "distance_km": float(a.distance_km),
+                                "eta_minutes": a.estimated_arrival_min,
+                            }
+                            for a in created_assignments
+                        ],
+                    }
+                )
+
+            else:
+                # Single unit assignment
+                authority, details = router.find_best_authority(incident)
+
+                if not authority:
+                    return Response(
+                        {"error": "No available authorities found"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+                # Create assignment
+                assignment = Assignment.objects.create(
+                    incident=incident,
+                    authority=authority,
+                    assigned_by=request.user,
+                    status="assigned",
+                    distance_km=details["distance_km"],
+                    estimated_arrival_min=details["eta_minutes"],
+                )
+
+                # Create notification
+                Notification.objects.create(
+                    user=authority.user,
+                    notification_type="assignment",
+                    title="New Incident Assignment",
+                    message=f'You have been assigned to a {incident.incident_type} incident. ETA: {details["eta_minutes"]} minutes',
+                    priority=(
+                        "medium" if incident.severity in ["low", "medium"] else "high"
+                    ),
+                )
+
+                # Create incident update
+                IncidentUpdate.objects.create(
+                    incident=incident,
+                    updated_by=request.user,
+                    update_type="assignment",
+                    old_status="",
+                    new_status="",
+                    message=f'Assigned to {authority.organization_name} (Distance: {details["distance_km"]}km, ETA: {details["eta_minutes"]}min, Score: {details["total_score"]})',
+                )
+
+                # Update incident status
+                incident.status = "assigned"
+                incident.save()
+
+                return Response(
+                    {
+                        "message": "Authority assigned successfully",
+                        "assignment": {
+                            "id": str(assignment.id),
+                            "authority": authority.organization_name,
+                            "authority_type": authority.authority_type,
+                            "distance_km": details["distance_km"],
+                            "eta_minutes": details["eta_minutes"],
+                            "score_breakdown": {
+                                "total_score": details["total_score"],
+                                "distance_score": details["distance_score"],
+                                "workload_score": details["workload_score"],
+                                "response_score": details["response_score"],
+                                "type_score": details["type_score"],
+                            },
+                        },
+                    }
+                )
+
+        except Incident.DoesNotExist:
+            return Response(
+                {"error": "Incident not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"An error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class FindBestAuthorityView(APIView):
+    """
+    Preview the best authority for an incident without assigning
+    Useful for manual assignment decisions
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, incident_id):
+        try:
+            incident = Incident.objects.get(id=incident_id)
+
+            router = IncidentRouter()
+            authority, details = router.find_best_authority(incident)
+
+            if not authority:
+                return Response(
+                    {"message": "No suitable authorities found", "suggestions": []}
+                )
+
+            # Get top 3 options
+            eligible = router._get_eligible_authorities(incident)
+            incident_coords = (
+                float(incident.location_latitude),
+                float(incident.location_longitude),
+            )
+
+            options = []
+            for auth in eligible[:5]:  # Check top 5
+                score_details = router._calculate_score(auth, incident, incident_coords)
+                if score_details["total_score"] > 0:
+                    options.append(
+                        {
+                            "authority_id": str(auth.id),
+                            "name": auth.organization_name,
+                            "type": auth.authority_type,
+                            "distance_km": score_details["distance_km"],
+                            "eta_minutes": score_details["eta_minutes"],
+                            "current_workload": score_details["current_workload"],
+                            "total_score": score_details["total_score"],
+                            "is_best": auth.id == authority.id,
+                        }
+                    )
+
+            # Sort by score
+            options.sort(key=lambda x: x["total_score"], reverse=True)
+
+            return Response(
+                {
+                    "incident_id": str(incident.id),
+                    "incident_type": incident.incident_type,
+                    "severity": incident.severity,
+                    "best_authority": {
+                        "id": str(authority.id),
+                        "name": authority.organization_name,
+                        "type": authority.authority_type,
+                    },
+                    "top_options": options[:3],
+                    "all_options": options,
+                }
+            )
+
+        except Incident.DoesNotExist:
+            return Response(
+                {"error": "Incident not found"}, status=status.HTTP_404_NOT_FOUND
             )

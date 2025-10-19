@@ -1,6 +1,8 @@
 from django.urls import path
 from .views import (
+    AutoAssignIncidentView,
     CreateIncidentView,
+    FindBestAuthorityView,
     IncidentListView,
     IncidentDetailView,
     IncidentTimelineView,
@@ -51,4 +53,12 @@ urlpatterns = [
     path('media/<uuid:media_id>/download/', 
          DownloadMediaView.as_view(), 
          name='download-media'),
+
+     path('<uuid:incident_id>/auto-assign/', 
+         AutoAssignIncidentView.as_view(), 
+         name='auto-assign-incident'),
+    
+    path('<uuid:incident_id>/find-authority/', 
+         FindBestAuthorityView.as_view(), 
+         name='find-best-authority'),
 ]
