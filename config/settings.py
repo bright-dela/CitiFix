@@ -42,6 +42,8 @@ INSTALLED_APPS = [
     # Third party apps (external packages)
     "rest_framework",
     "rest_framework_simplejwt",
+    "corsheaders",
+    "channels",
     # Our custom apps
     "users",
     "incidents",
@@ -50,6 +52,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -76,6 +79,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 
 # Database
@@ -88,6 +92,11 @@ DATABASES = {
     }
 }
 
+CHANNELS_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -125,7 +134,7 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_DIRS = [BASE_DIR / "static"] if (BASE_DIR / "static").exists() else []
 
 # Media files (User uploaded content)
 MEDIA_URL = "/media/"
@@ -158,9 +167,15 @@ REST_FRAMEWORK = {
 
 # JWT Token Settings
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),  # Token valid for 24 hours
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),  # Token valid for 15 minutes
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),  # Refresh valid for 7 days
     "ROTATE_REFRESH_TOKENS": False,
     "ALGORITHM": "HS256",
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http:127.0.0.1:3000"]
+
+# File Upload Settings - Maximum 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB in bytes
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB in bytes
