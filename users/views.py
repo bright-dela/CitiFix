@@ -1,4 +1,3 @@
-from django.shortcuts import render
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
@@ -34,7 +33,7 @@ class MediaHouseRegistrationView(generics.CreateAPIView):
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    pagination_class = [AllowAny]
+    permission_classes = [AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
 
 
