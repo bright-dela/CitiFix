@@ -174,7 +174,7 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http:127.0.0.1:3000"]
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 # File Upload Settings - Maximum 10MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB in bytes
