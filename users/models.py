@@ -167,6 +167,15 @@ class AuthorityProfile(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
 
+    # Statistics for tracking citizen activity
+    total_reports = models.IntegerField(default=0)
+    verified_reports = models.IntegerField(default=0)
+    reputation_score = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0.50
+    )
+
     
     class Meta:
         db_table = 'authority_profiles'
