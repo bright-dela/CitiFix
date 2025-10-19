@@ -46,8 +46,7 @@ INSTALLED_APPS = [
 
     # Our custom apps
     'users',
-    'incidents',
-    'notifications',
+    
 ]
 
 MIDDLEWARE = [
