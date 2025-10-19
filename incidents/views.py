@@ -1,13 +1,13 @@
 import mimetypes
 import os
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db import transaction
-from .models import Incident, IncidentMedia, Assignment, IncidentUpdate
+from .models import Incident, IncidentMedia, Assignment, IncidentUpdate, MediaAccess
 from .serializers import (
     IncidentCreateSerializer,
     IncidentListSerializer,
@@ -40,7 +40,7 @@ class IncidentDetailView(generics.RetrieveAPIView):
 
 
 class IncidentTimelineView(generics.ListAPIView):
-    pagination_class = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     serializer_class = IncidentUpdateSerializer
 
     def get_queryset(self):
@@ -255,6 +255,7 @@ class DownloadMediaView(generics.RetrieveAPIView):
                         )
 
                     tier = media_house.subscription_tier
+
                     if tier == "basic":
                         return Response(
                             {
@@ -264,22 +265,13 @@ class DownloadMediaView(generics.RetrieveAPIView):
                         )
 
                     if tier == "premium":
-                        if incident.media_access_level == "basic":
-                            return Response(
-                                {
-                                    "error": "This incident is only available for basic access (view only)"
-                                },
-                                status=status.HTTP_403_FORBIDDEN,
-                            )
-                        elif incident.media_access_level != "premium":
+                        if incident.media_access_level != "premium":
                             return Response(
                                 {
                                     "error": "This incident is not available for premium access"
                                 },
                                 status=status.HTTP_403_FORBIDDEN,
                             )
-
-                    from .models import MediaAccess
 
                     MediaAccess.objects.create(
                         media_house=media_house,
@@ -293,14 +285,6 @@ class DownloadMediaView(generics.RetrieveAPIView):
                         {"error": "Media house profile not found"},
                         status=status.HTTP_403_FORBIDDEN,
                     )
-
-            elif user.user_type == "admin":
-                pass
-
-            else:
-                return Response(
-                    {"error": "Invalid user type"}, status=status.HTTP_403_FORBIDDEN
-                )
 
             # Check if file exists
             if not media.file or not os.path.exists(media.file.path):
@@ -324,9 +308,7 @@ class DownloadMediaView(generics.RetrieveAPIView):
             incident_type = incident.incident_type
             timestamp = incident.created_at.strftime("%Y%m%d_%H%M%S")
             extension = os.path.splitext(file_path)[1]
-            download_filename = (
-                f"citifix_{incident_type}_{timestamp}_{media.id}{extension}"
-            )
+            download_filename = f"citifix_{incident_type}_{timestamp}_{media.id}{extension}"
 
             response = FileResponse(
                 open(file_path, "rb"),

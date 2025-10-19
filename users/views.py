@@ -61,8 +61,9 @@ class MediaHouseProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user.media_profile
 
 
-class PendingAuthoritiesListView(generics.ListAPIView):
+class PendingApprovalsView(generics.ListAPIView):
     permission_classes = [IsAdminUser]
+
 
     def get(self, request):
         pending_authorities = AuthorityProfile.objects.filter(approval_status="pending")
