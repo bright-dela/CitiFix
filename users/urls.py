@@ -9,7 +9,7 @@ from .views import (
     CitizenProfileView,
     AuthorityProfileView,
     MediaHouseProfileView,
-    PendingAuthoritiesListView,
+    PendingApprovalsView,
     ApproveAuthorityView,
     ApproveMediaHouseView,
 )
@@ -39,7 +39,7 @@ urlpatterns = [
     # Admin endpoints (requires admin access)
     path(
         "admin/approvals/",
-        PendingAuthoritiesListView.as_view(),
+        PendingApprovalsView.as_view(),
         name="pending-approvals",
     ),
     path(
