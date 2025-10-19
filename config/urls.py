@@ -25,6 +25,8 @@ urlpatterns = [
     
     # API Version 1 endpoints
     path("api/v1/users/", include("users.urls")),
+    path("api/v1/incidents/", include("incidents.urls")),
+    path("api/v1/notifications/", include("notifications.urls")),
 ]
 
 
