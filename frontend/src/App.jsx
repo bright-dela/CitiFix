@@ -1,26 +1,3 @@
-// import React from "react";
-
-// function App() {
-//     return (
-//         <div className="min-h-screen bg-gradient-tobr from-blue-500 to-purple-600 flex items-center justify-center">
-//             <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md">
-//                 <h1 className="text-4xl font-bold text-gray-800 mb-4">
-//                     🚨 CitiFix
-//                 </h1>
-//                 <p className="text-gray-600 mb-4">
-//                     Emergency Reporting System
-//                 </p>
-//                 <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
-//                     ✅ Vite is working!
-//                 </div>
-//             </div>
-//         </div>
-//     );
-// }
-
-// export default App;
-
-
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { AlertCircle, MapPin, Phone, Mail, User, Lock, Building, FileText, Plus, Bell, LogOut, Menu, X, Loader } from 'lucide-react';
@@ -36,7 +13,7 @@ L.Icon.Default.mergeOptions({
 });
 
 // API Configuration
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = 'http://localhost:8000/api/v1';
 
 // Auth Service
 const AuthService = {
@@ -687,19 +664,52 @@ function Dashboard() {
         }
       );
 
-    if (response.ok) {
-      const data = await response.json();
-      alert(data.message);
-      loadIncidents(); // Refresh the list
-    } else {
-      const error = await response.json();
-      alert(`Error: ${error.error}`);
+      if (response.ok) {
+        const data = await response.json();
+        const assignmentInfo = data.assignment || data.assignments?.[0];
+        
+        if (assignmentInfo) {
+          alert(`✅ ${data.message}\n\nAuthority: ${assignmentInfo.authority || 'Multiple units'}\nDistance: ${assignmentInfo.distance_km || 'N/A'} km\nETA: ${assignmentInfo.eta_minutes || 'N/A'} minutes`);
+        } else {
+          alert(`✅ ${data.message}`);
+        }
+        loadIncidents();
+      } else {
+        const error = await response.json();
+        alert(`❌ Error: ${error.error}`);
+      }
+    } catch (err) {
+      alert('Failed to auto-assign incident');
     }
-  } catch (err) {
-    alert('Failed to auto-assign incident');
-  }
-};
+  };
 
+  const handleFindAuthority = async (incidentId) => {
+    try {
+      const response = await fetch(
+        `${API_BASE}/incidents/${incidentId}/find-authority/`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${AuthService.getToken()}`
+          }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.top_options && data.top_options.length > 0) {
+          const options = data.top_options.map((opt, idx) => 
+            `${idx + 1}. ${opt.name} (${opt.type})\n   Distance: ${opt.distance_km}km | ETA: ${opt.eta_minutes}min | Score: ${opt.total_score.toFixed(2)} ${opt.is_best ? '⭐ BEST' : ''}`
+          ).join('\n\n');
+          alert(`🔍 Top Authority Options:\n\n${options}`);
+        } else {
+          alert('No suitable authorities found for this incident');
+        }
+      }
+    } catch (err) {
+      alert('Failed to find authorities');
+    }
+  };
 
   const handleLogout = () => {
     AuthService.logout();
@@ -751,195 +761,11 @@ function Dashboard() {
                 Logout
               </button>
             </div>
-
-            <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="md:hidden text-gray-700"
-            >
-              {showMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
-          </div>
-
-          {showMenu && (
-            <div className="md:hidden mt-4 pt-4 border-t">
-              <div className="space-y-2">
-                <p className="text-gray-700">Welcome, {user?.full_name}</p>
-                <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center justify-center px-4 py-2 text-red-600 bg-red-50 rounded-lg"
-                >
-                  <LogOut className="w-5 h-5 mr-2" />
-                  Logout
-                </button>
               </div>
             </div>
-          )}
+          </header>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Quick Report Button */}
-        <button
-          onClick={() => setShowReportModal(true)}
-          className="w-full mb-8 bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-4 rounded-xl font-semibold hover:from-red-700 hover:to-red-800 transition-all shadow-lg flex items-center justify-center"
-        >
-          <Plus className="w-6 h-6 mr-2" />
-          Report New Incident
-        </button>
-
-        {/* Map */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Incident Map</h2>
-          <div className="h-96 rounded-lg overflow-hidden">
-            <MapContainer
-              center={[mapCenter.lat, mapCenter.lng]}
-              zoom={13}
-              style={{ height: '100%', width: '100%' }}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              <MapAutoCenter position={userLocation ? [userLocation.lat, userLocation.lng] : null} />
-              
-              {incidents.map((incident) => (
-                <Marker
-                  key={incident.id}
-                  position={[parseFloat(incident.location_latitude), parseFloat(incident.location_longitude)]}
-                  icon={incidentIcons[incident.incident_type] || incidentIcons.fire}
-                >
-                  <Popup>
-                    <div className="p-2">
-                      <h3 className="font-bold text-lg mb-2 capitalize">
-                        {incident.incident_type.replace('_', ' ')}
-                      </h3>
-                      <p className="text-sm text-gray-600 mb-2">{incident.description}</p>
-                      <div className="flex gap-2 mb-2">
-                        <span className={`text-xs px-2 py-1 rounded ${getSeverityColor(incident.severity)}`}>
-                          {incident.severity}
-                        </span>
-                        <span className={`text-xs px-2 py-1 rounded ${getStatusColor(incident.status)}`}>
-                          {incident.status}
-                        </span>
-                      </div>
-                      {incident.location_address && (
-                        <p className="text-xs text-gray-500">
-                          <MapPin className="w-3 h-3 inline mr-1" />
-                          {incident.location_address}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-400 mt-2">
-                        {new Date(incident.created_at).toLocaleString()}
-                      </p>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
-          </div>
-        </div>
-
-        {/* Incidents List */}
-        <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Recent Incidents</h2>
-          
-          {loading ? (
-            <div className="flex justify-center items-center py-12">
-              <Loader className="w-8 h-8 animate-spin text-red-600" />
-            </div>
-          ) : incidents.length === 0 ? (
-            <div className="text-center py-12">
-              <AlertCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No incidents reported yet</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {incidents.map((incident) => (
-                <div
-                  key={incident.id}
-                  className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-bold text-lg capitalize">
-                        {incident.incident_type.replace('_', ' ')}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Reported by: {incident.reporter_name}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className={`text-xs px-3 py-1 rounded-full font-medium ${getSeverityColor(incident.severity)}`}>
-                        {incident.severity}
-                      </span>
-                      <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(incident.status)}`}>
-                        {incident.status.replace('_', ' ')}
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="text-gray-700 mb-3">{incident.description}</p>
-
-                  <div className="flex flex-wrap gap-4 text-sm text-gray-500">
-                    {incident.location_address && (
-                      <div className="flex items-center">
-                        <MapPin className="w-4 h-4 mr-1" />
-                        {incident.location_address}
-                      </div>
-                    )}
-                    {incident.district && (
-                      <div className="flex items-center">
-                        <Building className="w-4 h-4 mr-1" />
-                        {incident.district}, {incident.region}
-                      </div>
-                    )}
-                    <div className="flex items-center">
-                      <FileText className="w-4 h-4 mr-1" />
-                      {incident.media_count || 0} media files
-                    </div>
-                  </div>
-
-                  <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
-                    Reported: {new Date(incident.created_at).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Report Modal */}
-      {showReportModal && (
-        <ReportIncidentModal
-          onClose={() => setShowReportModal(false)}
-          onSuccess={loadIncidents}
-          userLocation={userLocation}
-        />
-      )}
-    </div>
-  );
-}
-
-// Main App Component
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(AuthService.isAuthenticated());
-  const [showRegister, setShowRegister] = useState(false);
-
-  if (!isAuthenticated) {
-    return showRegister ? (
-      <RegisterForm
-        onRegister={() => setIsAuthenticated(true)}
-        onSwitchToLogin={() => setShowRegister(false)}
-      />
-    ) : (
-      <LoginForm
-        onLogin={() => setIsAuthenticated(true)}
-        onSwitchToRegister={() => setShowRegister(true)}
-      />
-    );
-  }
-
-  return <Dashboard />;
-}
+      );
+    }
+    
+    export default Dashboard;
