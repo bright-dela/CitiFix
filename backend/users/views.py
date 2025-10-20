@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import User, CitizenProfile, AuthorityProfile, MediaHouseProfile
@@ -17,58 +18,68 @@ from .serializers import (
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """Login view with custom token."""
     permission_classes = [AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
 
 
 class CitizenRegistrationView(generics.CreateAPIView):
-    """Registers a new citizen."""
     permission_classes = [AllowAny]
     serializer_class = CitizenRegistrationSerializer
 
 
 class AuthorityRegistrationView(generics.CreateAPIView):
-    """Registers a new authority account (pending admin approval)."""
     permission_classes = [AllowAny]
     serializer_class = AuthorityRegistrationSerializer
 
 
 class MediaHouseRegistrationView(generics.CreateAPIView):
-    """Registers a new media house (pending admin approval)."""
     permission_classes = [AllowAny]
     serializer_class = MediaHouseRegistrationSerializer
 
 
 class CitizenProfileView(generics.RetrieveUpdateAPIView):
-    """Retrieve or update a citizen's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = CitizenProfileSerializer
 
     def get_object(self):
-        return self.request.user.citizen_profile
+        user = self.request.user
+        if user.user_type != "citizen":
+            raise PermissionDenied("You are not authorized to access this profile.")
+        try:
+            return user.citizen_profile
+        except CitizenProfile.DoesNotExist:
+            raise NotFound("Citizen profile not found.")
 
 
 class AuthorityProfileView(generics.RetrieveUpdateAPIView):
-    """Retrieve or update an authority's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = AuthorityProfileSerializer
 
     def get_object(self):
-        return self.request.user.authority_profile
+        user = self.request.user
+        if user.user_type != "authority":
+            raise PermissionDenied("You are not authorized to access this profile.")
+        try:
+            return user.authority_profile
+        except AuthorityProfile.DoesNotExist:
+            raise NotFound("Authority profile not found.")
 
 
 class MediaHouseProfileView(generics.RetrieveUpdateAPIView):
-    """Retrieve or update a media house's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = MediaHouseProfileSerializer
 
     def get_object(self):
-        return self.request.user.media_profile
+        user = self.request.user
+        if user.user_type != "media":
+            raise PermissionDenied("You are not authorized to access this profile.")
+        try:
+            return user.media_profile
+        except MediaHouseProfile.DoesNotExist:
+            raise NotFound("Media profile not found.")
 
 
 class PendingApprovalsView(generics.ListAPIView):
-    """Lists all pending authority and media house approvals."""
     permission_classes = [IsAdminUser]
 
     def list(self, request, *args, **kwargs):
@@ -82,41 +93,43 @@ class PendingApprovalsView(generics.ListAPIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
-class ApproveAuthorityView(generics.UpdateAPIView):
-    """Approve an authority account."""
+class BaseApprovalView(generics.UpdateAPIView):
     permission_classes = [IsAdminUser]
+    model = None
+    object_name = ""
 
-    def post(self, request, authority_id):
+    def patch(self, request, object_id):
         try:
-            authority = AuthorityProfile.objects.get(id=authority_id)
-        except AuthorityProfile.DoesNotExist:
-            return Response({"error": "Authority not found."}, status=status.HTTP_404_NOT_FOUND)
+            instance = self.model.objects.get(id=object_id)
+        except self.model.DoesNotExist:
+            return Response({"error": f"{self.object_name} not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        authority.approval_status = "approved"
-        authority.approved_by = request.user
-        authority.approved_at = timezone.now()
-        authority.user.is_active = True
-        authority.user.save()
-        authority.save()
+        action = request.data.get("action", "approve").lower()
 
-        return Response({"message": "Authority approved successfully."}, status=status.HTTP_200_OK)
+        if action == "approve":
+            instance.approval_status = "approved"
+            instance.approved_by = request.user
+            instance.approved_at = timezone.now()
+            instance.user.is_active = True
+            instance.user.save()
+            message = f"{self.object_name} approved successfully."
+        elif action == "reject":
+            instance.approval_status = "rejected"
+            instance.user.is_active = False
+            instance.user.save()
+            message = f"{self.object_name} rejected."
+        else:
+            return Response({"error": "Invalid action."}, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.save()
+        return Response({"message": message}, status=status.HTTP_200_OK)
 
 
-class ApproveMediaHouseView(generics.UpdateAPIView):
-    """Approve a media house account."""
-    permission_classes = [IsAdminUser]
+class ApproveAuthorityView(BaseApprovalView):
+    model = AuthorityProfile
+    object_name = "Authority"
 
-    def post(self, request, media_id):
-        try:
-            media = MediaHouseProfile.objects.get(id=media_id)
-        except MediaHouseProfile.DoesNotExist:
-            return Response({"error": "Media house not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        media.approval_status = "approved"
-        media.approved_by = request.user
-        media.approved_at = timezone.now()
-        media.user.is_active = True
-        media.user.save()
-        media.save()
-
-        return Response({"message": "Media house approved successfully."}, status=status.HTTP_200_OK)
+class ApproveMediaHouseView(BaseApprovalView):
+    model = MediaHouseProfile
+    object_name = "Media house"

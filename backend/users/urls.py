@@ -30,6 +30,6 @@ urlpatterns = [
 
     # Admin Actions
     path("admin/approvals/", PendingApprovalsView.as_view(), name="pending-approvals"),
-    path("admin/approve/authority/<uuid:authority_id>/", ApproveAuthorityView.as_view(), name="approve-authority"),
-    path("admin/approve/media/<uuid:media_id>/", ApproveMediaHouseView.as_view(), name="approve-media"),
+    path("admin/authority/<uuid:object_id>/", ApproveAuthorityView.as_view(), name="approve-authority"),
+    path("admin/media/<uuid:object_id>/", ApproveMediaHouseView.as_view(), name="approve-media"),
 ]

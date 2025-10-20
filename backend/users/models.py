@@ -73,6 +73,7 @@ class CitizenProfile(models.Model):
     address = models.TextField(null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     region = models.CharField(max_length=100, null=True, blank=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     total_reports = models.IntegerField(default=0)
     verified_reports = models.IntegerField(default=0)
     reputation_score = models.DecimalField(max_digits=3, decimal_places=2, default=0.50)
@@ -113,6 +114,7 @@ class AuthorityProfile(models.Model):
     contact_phone = models.CharField(max_length=20)
     station_latitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
     station_longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
+    document = models.FileField(upload_to="authority_docs/", blank=True, null=True)
     approval_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     approved_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_authorities"
@@ -162,6 +164,7 @@ class MediaHouseProfile(models.Model):
     address = models.TextField()
     city = models.CharField(max_length=100)
     region = models.CharField(max_length=100)
+    document = models.FileField(upload_to="media_docs/", blank=True, null=True)
     approval_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     approved_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_media"

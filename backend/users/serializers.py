@@ -4,9 +4,8 @@ from django.contrib.auth.password_validation import validate_password
 from .models import User, CitizenProfile, AuthorityProfile, MediaHouseProfile
 
 
+#  BASIC USER SERIALIZER
 class UserSerializer(serializers.ModelSerializer):
-    """Basic user information."""
-
     class Meta:
         model = User
         fields = [
@@ -19,12 +18,10 @@ class UserSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+        
 
-
-
+#  CITIZEN
 class CitizenRegistrationSerializer(serializers.Serializer):
-    """Handles new citizen registration."""
-
     phone_number = serializers.CharField(max_length=20)
     password = serializers.CharField(write_only=True, validators=[validate_password])
     full_name = serializers.CharField(max_length=255)
@@ -48,8 +45,6 @@ class CitizenRegistrationSerializer(serializers.Serializer):
 
 
 class CitizenProfileSerializer(serializers.ModelSerializer):
-    """Citizen profile with linked user."""
-
     user = UserSerializer(read_only=True)
 
     class Meta:
@@ -61,19 +56,37 @@ class CitizenProfileSerializer(serializers.ModelSerializer):
             "address",
             "city",
             "region",
+            "avatar",
             "total_reports",
             "verified_reports",
             "reputation_score",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "total_reports",
+            "verified_reports",
+            "reputation_score",
+            "created_at",
+            "updated_at",
+        ]
 
 
+class CitizenProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CitizenProfile
+        fields = [
+            "date_of_birth",
+            "gender",
+            "address",
+            "city",
+            "region",
+            "avatar",
+        ]
 
+
+#  AUTHORITY
 class AuthorityRegistrationSerializer(serializers.Serializer):
-    """Handles registration for authorities (requires admin approval)."""
-
     phone_number = serializers.CharField(max_length=20)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, validators=[validate_password])
@@ -81,11 +94,14 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
     organization_name = serializers.CharField(max_length=255)
     authority_type = serializers.ChoiceField(choices=["police", "fire", "ambulance", "hospital"])
     license_number = serializers.CharField(max_length=100)
+    station_latitude = serializers.DecimalField(max_digits=10, decimal_places=8, required=False, allow_null=True)
+    station_longitude = serializers.DecimalField(max_digits=11, decimal_places=8, required=False, allow_null=True)
     station_address = serializers.CharField()
     region = serializers.CharField(max_length=100)
     district = serializers.CharField(max_length=100)
     official_email = serializers.EmailField()
     contact_phone = serializers.CharField(max_length=20)
+    document = serializers.FileField(required=True)
 
     def validate_phone_number(self, value):
         if User.objects.filter(phone_number=value).exists():
@@ -99,14 +115,21 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         profile_data = {
-            "organization_name": validated_data.pop("organization_name"),
-            "authority_type": validated_data.pop("authority_type"),
-            "license_number": validated_data.pop("license_number"),
-            "station_address": validated_data.pop("station_address"),
-            "region": validated_data.pop("region"),
-            "district": validated_data.pop("district"),
-            "official_email": validated_data.pop("official_email"),
-            "contact_phone": validated_data.pop("contact_phone"),
+            key: validated_data.pop(key)
+            for key in [
+                "organization_name",
+                "authority_type",
+                "license_number",
+                "station_address",
+                "region",
+                "district",
+                "official_email",
+                "contact_phone",
+                "document",
+                "station_latitude",
+                "station_longitude",
+            ]
+            if key in validated_data
         }
 
         user = User.objects.create_user(
@@ -122,8 +145,6 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
 
 
 class AuthorityProfileSerializer(serializers.ModelSerializer):
-    """Authority profile with linked user."""
-
     user = UserSerializer(read_only=True)
 
     class Meta:
@@ -140,18 +161,42 @@ class AuthorityProfileSerializer(serializers.ModelSerializer):
             "district",
             "official_email",
             "contact_phone",
+            "document",
             "approval_status",
             "approved_by",
             "approved_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "approval_status",
+            "approved_by",
+            "approved_at",
+            "created_at",
+            "updated_at",
+        ]
 
 
+class AuthorityProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuthorityProfile
+        fields = [
+            "organization_name",
+            "authority_type",
+            "station_address",
+            "region",
+            "district",
+            "official_email",
+            "contact_phone",
+            "station_latitude",
+            "station_longitude",
+            "document",
+        ]
+        read_only_fields = ["license_number", "approval_status"]
+
+
+#  MEDIA HOUSES
 class MediaHouseRegistrationSerializer(serializers.Serializer):
-    """Handles registration for media houses (requires admin approval)."""
-
     phone_number = serializers.CharField(max_length=20)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, validators=[validate_password])
@@ -164,6 +209,7 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
     address = serializers.CharField()
     city = serializers.CharField(max_length=100)
     region = serializers.CharField(max_length=100)
+    document = serializers.FileField(required=True)
 
     def validate_phone_number(self, value):
         if User.objects.filter(phone_number=value).exists():
@@ -177,14 +223,18 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         profile_data = {
-            "organization_name": validated_data.pop("organization_name"),
-            "media_type": validated_data.pop("media_type"),
-            "license_number": validated_data.pop("license_number"),
-            "official_email": validated_data.pop("official_email"),
-            "contact_phone": validated_data.pop("contact_phone"),
-            "address": validated_data.pop("address"),
-            "city": validated_data.pop("city"),
-            "region": validated_data.pop("region"),
+            key: validated_data.pop(key)
+            for key in [
+                "organization_name",
+                "media_type",
+                "license_number",
+                "official_email",
+                "contact_phone",
+                "address",
+                "city",
+                "region",
+                "document",
+            ]
         }
 
         user = User.objects.create_user(
@@ -200,8 +250,6 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
 
 
 class MediaHouseProfileSerializer(serializers.ModelSerializer):
-    """Media house profile with linked user."""
-
     user = UserSerializer(read_only=True)
 
     class Meta:
@@ -216,6 +264,7 @@ class MediaHouseProfileSerializer(serializers.ModelSerializer):
             "address",
             "city",
             "region",
+            "document",
             "approval_status",
             "approved_by",
             "approved_at",
@@ -223,9 +272,33 @@ class MediaHouseProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "approval_status",
+            "approved_by",
+            "approved_at",
+            "created_at",
+            "updated_at",
+        ]
 
 
+class MediaHouseProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MediaHouseProfile
+        fields = [
+            "organization_name",
+            "media_type",
+            "official_email",
+            "contact_phone",
+            "address",
+            "city",
+            "region",
+            "document",
+            "subscription_tier",
+        ]
+        read_only_fields = ["license_number", "approval_status"]
+
+
+#  JWT TOKEN
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """JWT token that includes basic user info."""
 
