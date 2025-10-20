@@ -670,27 +670,22 @@ function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    AuthService.logout();
-    window.location.reload();
-  };
-
   const handleAutoAssign = async (incidentId) => {
-  if (!window.confirm('Auto-assign this incident to the best available authority?')) {
-    return;
-  }
+    if (!window.confirm('Auto-assign this incident to the best available authority?')) {
+      return;
+    }
 
-  try {
-    const response = await fetch(
-      `${API_BASE}/incidents/${incidentId}/auto-assign/`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${AuthService.getToken()}`,
-          'Content-Type': 'application/json'
+    try {
+      const response = await fetch(
+        `${API_BASE}/incidents/${incidentId}/auto-assign/`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${AuthService.getToken()}`,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      );
 
     if (response.ok) {
       const data = await response.json();
@@ -704,6 +699,12 @@ function Dashboard() {
     alert('Failed to auto-assign incident');
   }
 };
+
+
+  const handleLogout = () => {
+    AuthService.logout();
+    window.location.reload();
+  };
 
   const getSeverityColor = (severity) => {
     const colors = {
