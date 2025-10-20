@@ -51,7 +51,12 @@ class IncidentCreateSerializer(serializers.Serializer):
         # Determine reporter (None if anonymous)
         reporter = None
         if not validated_data.get('is_anonymous'):
-            reporter = user.citizen_profile
+            try:
+                reporter = user.citizen_profile
+            except AttributeError:
+                # Create citizen profile if it doesn't exist
+                from users.models import CitizenProfile
+                reporter = CitizenProfile.objects.create(user=user)
         
         # Create the incident
         incident = Incident.objects.create(
@@ -74,6 +79,21 @@ class IncidentCreateSerializer(serializers.Serializer):
             incident.save()
         
         return incident
+    
+    def to_representation(self, instance):
+        """Return incident data after creation"""
+        return {
+            'id': str(instance.id),
+            'incident_type': instance.incident_type,
+            'severity': instance.severity,
+            'status': instance.status,
+            'description': instance.description,
+            'location_latitude': float(instance.location_latitude),
+            'location_longitude': float(instance.location_longitude),
+            'location_address': instance.location_address,
+            'is_anonymous': instance.is_anonymous,
+            'created_at': instance.created_at.isoformat() if instance.created_at else None,
+        }
 
 
 class IncidentListSerializer(serializers.ModelSerializer):
