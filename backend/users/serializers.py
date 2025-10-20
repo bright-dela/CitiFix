@@ -5,7 +5,7 @@ from .models import User, CitizenProfile, AuthorityProfile, MediaHouseProfile
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """Basic user information serializer"""
+    """Basic user information."""
 
     class Meta:
         model = User
@@ -21,26 +21,21 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+
 class CitizenRegistrationSerializer(serializers.Serializer):
-    """
-    Handles citizen registration
-    Simple signup for regular users
-    """
+    """Handles new citizen registration."""
 
     phone_number = serializers.CharField(max_length=20)
     password = serializers.CharField(write_only=True, validators=[validate_password])
     full_name = serializers.CharField(max_length=255)
-    email = serializers.EmailField(required=False)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
     def validate_phone_number(self, value):
-        """Check if phone number is already taken"""
         if User.objects.filter(phone_number=value).exists():
-            raise serializers.ValidationError("Phone number already registered")
+            raise serializers.ValidationError("This phone number is already registered.")
         return value
 
     def create(self, validated_data):
-        """Create new citizen user and profile"""
-        # Create the user account.
         user = User.objects.create_user(
             phone_number=validated_data["phone_number"],
             password=validated_data["password"],
@@ -48,15 +43,12 @@ class CitizenRegistrationSerializer(serializers.Serializer):
             email=validated_data.get("email"),
             user_type="citizen",
         )
-
-        # Create empty citizen profile. Can be updated later.
         CitizenProfile.objects.create(user=user)
-
         return user
 
 
 class CitizenProfileSerializer(serializers.ModelSerializer):
-    """Citizen profile with user information"""
+    """Citizen profile with linked user."""
 
     user = UserSerializer(read_only=True)
 
@@ -69,25 +61,25 @@ class CitizenProfileSerializer(serializers.ModelSerializer):
             "address",
             "city",
             "region",
+            "total_reports",
+            "verified_reports",
+            "reputation_score",
             "created_at",
             "updated_at",
         ]
+        read_only_fields = ["created_at", "updated_at"]
+
 
 
 class AuthorityRegistrationSerializer(serializers.Serializer):
-    """
-    Handles authority registration
-    Requires approval before account becomes active
-    """
+    """Handles registration for authorities (requires admin approval)."""
 
     phone_number = serializers.CharField(max_length=20)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, validators=[validate_password])
     full_name = serializers.CharField(max_length=255)
     organization_name = serializers.CharField(max_length=255)
-    authority_type = serializers.ChoiceField(
-        choices=["police", "fire", "ambulance", "hospital"]
-    )
+    authority_type = serializers.ChoiceField(choices=["police", "fire", "ambulance", "hospital"])
     license_number = serializers.CharField(max_length=100)
     station_address = serializers.CharField()
     region = serializers.CharField(max_length=100)
@@ -96,21 +88,17 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
     contact_phone = serializers.CharField(max_length=20)
 
     def validate_phone_number(self, value):
-        """Check if phone number is already taken"""
         if User.objects.filter(phone_number=value).exists():
-            raise serializers.ValidationError("Phone number already registered")
+            raise serializers.ValidationError("This phone number is already registered.")
         return value
 
     def validate_license_number(self, value):
-        """Check if license number is already registered"""
         if AuthorityProfile.objects.filter(license_number=value).exists():
-            raise serializers.ValidationError("License number already registered")
+            raise serializers.ValidationError("This license number is already in use.")
         return value
 
     def create(self, validated_data):
-        """Create new authority user (inactive until approved)"""
-        # Separate authority-specific data
-        authority_fields = {
+        profile_data = {
             "organization_name": validated_data.pop("organization_name"),
             "authority_type": validated_data.pop("authority_type"),
             "license_number": validated_data.pop("license_number"),
@@ -121,7 +109,6 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
             "contact_phone": validated_data.pop("contact_phone"),
         }
 
-        # Create user (inactive until admin approves)
         user = User.objects.create_user(
             phone_number=validated_data["phone_number"],
             password=validated_data["password"],
@@ -130,15 +117,12 @@ class AuthorityRegistrationSerializer(serializers.Serializer):
             user_type="authority",
             is_active=False,
         )
-
-        # Create authority profile
-        AuthorityProfile.objects.create(user=user, **authority_fields)
-
+        AuthorityProfile.objects.create(user=user, **profile_data)
         return user
 
 
 class AuthorityProfileSerializer(serializers.ModelSerializer):
-    """Authority profile with user information"""
+    """Authority profile with linked user."""
 
     user = UserSerializer(read_only=True)
 
@@ -162,13 +146,11 @@ class AuthorityProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class MediaHouseRegistrationSerializer(serializers.Serializer):
-    """
-    Handles media house registration
-    Requires approval before account becomes active
-    """
+    """Handles registration for media houses (requires admin approval)."""
 
     phone_number = serializers.CharField(max_length=20)
     email = serializers.EmailField()
@@ -184,21 +166,17 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
     region = serializers.CharField(max_length=100)
 
     def validate_phone_number(self, value):
-        """Check if phone number is already taken"""
         if User.objects.filter(phone_number=value).exists():
-            raise serializers.ValidationError("Phone number already registered")
+            raise serializers.ValidationError("This phone number is already registered.")
         return value
 
     def validate_license_number(self, value):
-        """Check if license number is already registered"""
         if MediaHouseProfile.objects.filter(license_number=value).exists():
-            raise serializers.ValidationError("License number already registered")
+            raise serializers.ValidationError("This license number is already in use.")
         return value
 
     def create(self, validated_data):
-        """Create new media house user (inactive until approved)"""
-        # Separate media-specific data
-        media_fields = {
+        profile_data = {
             "organization_name": validated_data.pop("organization_name"),
             "media_type": validated_data.pop("media_type"),
             "license_number": validated_data.pop("license_number"),
@@ -209,7 +187,6 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
             "region": validated_data.pop("region"),
         }
 
-        # Create user (inactive until admin approves)
         user = User.objects.create_user(
             phone_number=validated_data["phone_number"],
             password=validated_data["password"],
@@ -218,15 +195,12 @@ class MediaHouseRegistrationSerializer(serializers.Serializer):
             user_type="media",
             is_active=False,
         )
-
-        # Create media house profile
-        MediaHouseProfile.objects.create(user=user, **media_fields)
-
+        MediaHouseProfile.objects.create(user=user, **profile_data)
         return user
 
 
 class MediaHouseProfileSerializer(serializers.ModelSerializer):
-    """Media house profile with user information"""
+    """Media house profile with linked user."""
 
     user = UserSerializer(read_only=True)
 
@@ -249,30 +223,21 @@ class MediaHouseProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    Enhanced JWT token with additional user information
-    Used for login
-    """
+    """JWT token that includes basic user info."""
 
     @classmethod
     def get_token(cls, user):
-        """Add custom claims to token"""
         token = super().get_token(user)
-
-        # Add user info to token
         token["user_type"] = user.user_type
         token["full_name"] = user.full_name
-
         return token
 
     def validate(self, attrs):
-        """Add user data to response"""
         data = super().validate(attrs)
-
-        # Include user information in response
         data["user"] = {
             "id": str(self.user.id),
             "phone_number": self.user.phone_number,
@@ -280,5 +245,4 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "full_name": self.user.full_name,
             "user_type": self.user.user_type,
         }
-
         return data

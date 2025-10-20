@@ -21,9 +21,60 @@ from notifications.models import Notification
 # Create your views here.
 
 
+from notifications.models import Notification
+
+
 class CreateIncidentView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = IncidentCreateSerializer
+
+    def perform_create(self, serializer):
+        """Create incident and send notifications"""
+        incident = serializer.save()
+
+        # Notify citizen (if not anonymous)
+        if not incident.is_anonymous and incident.reporter:
+            Notification.objects.create(
+                user=incident.reporter.user,
+                notification_type="general",
+                title="Incident Reported Successfully",
+                message=f"Your {incident.get_incident_type_display()} incident has been reported and is pending verification.",
+                priority="medium",
+            )
+
+        # Notify all admins about new incident
+        from users.models import User
+
+        admins = User.objects.filter(user_type="admin", is_active=True)
+        for admin in admins:
+            Notification.objects.create(
+                user=admin,
+                notification_type="general",
+                title="New Incident Reported",
+                message=f"New {incident.get_severity_display()} severity {incident.get_incident_type_display()} incident reported.",
+                priority=(
+                    "high" if incident.severity in ["high", "critical"] else "medium"
+                ),
+            )
+
+        # Notify authorities in the same region about critical incidents
+        if incident.severity == "critical":
+            from users.models import AuthorityProfile
+
+            nearby_authorities = AuthorityProfile.objects.filter(
+                region=incident.region, approval_status="approved", user__is_active=True
+            )[
+                :5
+            ]  # Notify first 5 authorities
+
+            for authority in nearby_authorities:
+                Notification.objects.create(
+                    user=authority.user,
+                    notification_type="general",
+                    title="Critical Incident Nearby",
+                    message=f"Critical {incident.get_incident_type_display()} incident reported in {incident.region}.",
+                    priority="high",
+                )
 
 
 class IncidentListView(generics.ListAPIView):
@@ -66,54 +117,97 @@ class IncidentTimelineView(generics.ListAPIView):
 #             return Response(
 #                 {"error": "Failed to verify"}, status=status.HTTP_400_BAD_REQUEST
 #             )
-        
+
+
 class VerifyIncidentView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated]
-    
+
     def post(self, request, incident_id):
         try:
             incident = Incident.objects.get(id=incident_id)
-            incident.status = 'verified'
+            old_status = incident.status
+            incident.status = "verified"
             incident.verified_by = request.user.authority_profile
             incident.verified_at = timezone.now()
-            incident.media_access_level = 'basic'  # Allow media access
+            incident.media_access_level = "basic"  # Allow media access
             incident.save()
-            
+
+            # Notify reporter about verification
+            if not incident.is_anonymous and incident.reporter:
+                Notification.objects.create(
+                    user=incident.reporter.user,
+                    notification_type="verification",
+                    title="Incident Verified",
+                    message=f"Your {incident.get_incident_type_display()} incident has been verified by {request.user.full_name}.",
+                    priority="high",
+                )
+
+            # Create incident update
+            IncidentUpdate.objects.create(
+                incident=incident,
+                updated_by=request.user,
+                update_type="verification",
+                old_status=old_status,
+                new_status="verified",
+                message=f"Incident verified by {request.user.full_name}",
+            )
+
             # Auto-assign after verification
-            auto_assign = request.data.get('auto_assign', True)
+            auto_assign = request.data.get("auto_assign", True)
             if auto_assign:
                 router = IncidentRouter()
                 authority, details = router.find_best_authority(incident)
-                
+
                 if authority:
-                    Assignment.objects.create(
+                    assignment = Assignment.objects.create(
                         incident=incident,
                         authority=authority,
                         assigned_by=request.user,
-                        status='assigned',
-                        distance_km=details['distance_km'],
-                        estimated_arrival_min=details['eta_minutes']
+                        status="assigned",
+                        distance_km=details["distance_km"],
+                        estimated_arrival_min=details["eta_minutes"],
                     )
-                    
-                    incident.status = 'assigned'
+
+                    incident.status = "assigned"
                     incident.save()
-                    
-                    # Notify authority
+
+                    # Notify assigned authority
                     Notification.objects.create(
                         user=authority.user,
-                        notification_type='assignment',
-                        title='New Incident Assignment',
-                        message=f'Verified {incident.incident_type} incident assigned to you',
-                        priority='high' if incident.severity in ['high', 'critical'] else 'medium'
+                        notification_type="assignment",
+                        title="New Incident Assignment",
+                        message=f'Verified {incident.get_incident_type_display()} incident assigned to you. ETA: {details["eta_minutes"]} minutes.',
+                        priority=(
+                            "high"
+                            if incident.severity in ["high", "critical"]
+                            else "medium"
+                        ),
                     )
-            
-            return Response({
-                'message': 'Incident verified and assigned successfully' if auto_assign else 'Incident verified',
-                'incident_id': str(incident.id),
-                'status': incident.status
-            } , status=status.HTTP_200_OK)
-        except:
-            return Response({'error': 'Failed to verify'}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # Notify reporter about assignment
+                    if not incident.is_anonymous and incident.reporter:
+                        Notification.objects.create(
+                            user=incident.reporter.user,
+                            notification_type="status_change",
+                            title="Incident Assigned",
+                            message=f"Your incident has been assigned to {authority.organization_name}.",
+                            priority="medium",
+                        )
+
+            return Response(
+                {
+                    "message": (
+                        "Incident verified and assigned successfully"
+                        if auto_assign
+                        else "Incident verified"
+                    ),
+                    "incident_id": str(incident.id),
+                    "status": incident.status,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AssignmentListView(generics.ListAPIView):
@@ -186,6 +280,7 @@ class UpdateAssignmentStatusView(generics.UpdateAPIView):
 
             assignment.save()
 
+            # Create incident update
             IncidentUpdate.objects.create(
                 incident=assignment.incident,
                 updated_by=request.user,
@@ -194,6 +289,25 @@ class UpdateAssignmentStatusView(generics.UpdateAPIView):
                 new_status=new_status,
                 message=f"Assignment status changed from {old_status} to {new_status} by {request.user.full_name}",
             )
+
+            # Notify reporter about status change
+            if not assignment.incident.is_anonymous and assignment.incident.reporter:
+                status_messages = {
+                    "en_route": f"{assignment.authority.organization_name} is on the way to your incident.",
+                    "arrived": f"{assignment.authority.organization_name} has arrived at the scene.",
+                    "in_progress": f"{assignment.authority.organization_name} is handling your incident.",
+                    "resolved": f"Your incident has been resolved by {assignment.authority.organization_name}.",
+                    "cancelled": f"Assignment to {assignment.authority.organization_name} has been cancelled.",
+                }
+
+                if new_status in status_messages:
+                    Notification.objects.create(
+                        user=assignment.incident.reporter.user,
+                        notification_type="status_change",
+                        title="Incident Status Update",
+                        message=status_messages[new_status],
+                        priority="high" if new_status == "resolved" else "medium",
+                    )
 
             notes = request.data.get("notes")
             if notes:

@@ -1,8 +1,9 @@
-from rest_framework import generics, status
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
-from rest_framework_simplejwt.views import TokenObtainPairView
 from django.utils import timezone
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView
+
 from .models import User, CitizenProfile, AuthorityProfile, MediaHouseProfile
 from .serializers import (
     CitizenRegistrationSerializer,
@@ -14,30 +15,33 @@ from .serializers import (
     MediaHouseProfileSerializer,
 )
 
-# Create your views here.
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """Login view with custom token."""
+    permission_classes = [AllowAny]
+    serializer_class = CustomTokenObtainPairSerializer
 
 
 class CitizenRegistrationView(generics.CreateAPIView):
+    """Registers a new citizen."""
     permission_classes = [AllowAny]
     serializer_class = CitizenRegistrationSerializer
 
 
 class AuthorityRegistrationView(generics.CreateAPIView):
+    """Registers a new authority account (pending admin approval)."""
     permission_classes = [AllowAny]
     serializer_class = AuthorityRegistrationSerializer
 
 
 class MediaHouseRegistrationView(generics.CreateAPIView):
+    """Registers a new media house (pending admin approval)."""
     permission_classes = [AllowAny]
     serializer_class = MediaHouseRegistrationSerializer
 
 
-class CustomTokenObtainPairView(TokenObtainPairView):
-    permission_classes = [AllowAny]
-    serializer_class = CustomTokenObtainPairSerializer
-
-
 class CitizenProfileView(generics.RetrieveUpdateAPIView):
+    """Retrieve or update a citizen's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = CitizenProfileSerializer
 
@@ -46,6 +50,7 @@ class CitizenProfileView(generics.RetrieveUpdateAPIView):
 
 
 class AuthorityProfileView(generics.RetrieveUpdateAPIView):
+    """Retrieve or update an authority's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = AuthorityProfileSerializer
 
@@ -54,6 +59,7 @@ class AuthorityProfileView(generics.RetrieveUpdateAPIView):
 
 
 class MediaHouseProfileView(generics.RetrieveUpdateAPIView):
+    """Retrieve or update a media house's profile."""
     permission_classes = [IsAuthenticated]
     serializer_class = MediaHouseProfileSerializer
 
@@ -62,67 +68,55 @@ class MediaHouseProfileView(generics.RetrieveUpdateAPIView):
 
 
 class PendingApprovalsView(generics.ListAPIView):
+    """Lists all pending authority and media house approvals."""
     permission_classes = [IsAdminUser]
 
+    def list(self, request, *args, **kwargs):
+        authorities = AuthorityProfile.objects.filter(approval_status="pending")
+        media_houses = MediaHouseProfile.objects.filter(approval_status="pending")
 
-    def get(self, request):
-        pending_authorities = AuthorityProfile.objects.filter(approval_status="pending")
-        pending_media = MediaHouseProfile.objects.filter(approval_status="pending")
-
-        return Response(
-            {
-                "authorities": AuthorityProfileSerializer(
-                    pending_authorities, many=True
-                ).data,
-                "media_houses": MediaHouseProfileSerializer(
-                    pending_media, many=True
-                ).data,
-            },
-            status=status.HTTP_200_OK,
-        )
+        data = {
+            "authorities": AuthorityProfileSerializer(authorities, many=True).data,
+            "media_houses": MediaHouseProfileSerializer(media_houses, many=True).data,
+        }
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class ApproveAuthorityView(generics.UpdateAPIView):
+    """Approve an authority account."""
     permission_classes = [IsAdminUser]
 
     def post(self, request, authority_id):
         try:
             authority = AuthorityProfile.objects.get(id=authority_id)
-            authority.approval_status = "approved"
-            authority.approved_by = request.user
-            authority.approved_at = timezone.now()
-            authority.user.is_active = True
-            authority.user.save()
-            authority.save()
-
-            return Response(
-                {"message": "Authority approved successfully."},
-                status=status.HTTP_200_OK,
-            )
         except AuthorityProfile.DoesNotExist:
-            return Response(
-                {"error": "Authority not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Authority not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        authority.approval_status = "approved"
+        authority.approved_by = request.user
+        authority.approved_at = timezone.now()
+        authority.user.is_active = True
+        authority.user.save()
+        authority.save()
+
+        return Response({"message": "Authority approved successfully."}, status=status.HTTP_200_OK)
 
 
 class ApproveMediaHouseView(generics.UpdateAPIView):
+    """Approve a media house account."""
     permission_classes = [IsAdminUser]
 
     def post(self, request, media_id):
         try:
             media = MediaHouseProfile.objects.get(id=media_id)
-            media.approval_status = "approved"
-            media.approved_by = request.user
-            media.approved_at = timezone.now()
-            media.user.is_active = True
-            media.user.save()
-            media.save()
-
-            return Response(
-                {"message": "Media house approved successfully."},
-                status=status.HTTP_200_OK,
-            )
         except MediaHouseProfile.DoesNotExist:
-            return Response(
-                {"error": "Media house not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Media house not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        media.approval_status = "approved"
+        media.approved_by = request.user
+        media.approved_at = timezone.now()
+        media.user.is_active = True
+        media.user.save()
+        media.save()
+
+        return Response({"message": "Media house approved successfully."}, status=status.HTTP_200_OK)
