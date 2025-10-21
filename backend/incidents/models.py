@@ -230,30 +230,32 @@ class IncidentUpdate(models.Model):
         return f"{self.update_type} - {self.incident.id}"
 
 
-class MediaAccess(models.Model):
-    """Logs which media houses accessed which incidents."""
 
-    ACCESS_TYPES = [
+class MediaAccess(models.Model):
+    """Keep track of which media houses accessed verified incidents."""
+
+    ACCESS_CHOICES = [
         ("view", "View"),
         ("download", "Download"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    media_house = models.ForeignKey("users.MediaHouseProfile", on_delete=models.CASCADE)
-    incident = models.ForeignKey(Incident, on_delete=models.CASCADE)
-    media_file = models.ForeignKey(
-        IncidentMedia, on_delete=models.SET_NULL, null=True, blank=True
+    media_house = models.ForeignKey(
+        "users.MediaHouseProfile",
+        on_delete=models.CASCADE,
+        related_name="access_logs"
     )
-    access_type = models.CharField(max_length=10, choices=ACCESS_TYPES)
+    incident = models.ForeignKey(
+        "incidents.Incident",
+        on_delete=models.CASCADE,
+        related_name="media_access"
+    )
+    access_type = models.CharField(max_length=10, choices=ACCESS_CHOICES)
     accessed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "media_access_log"
+        db_table = "media_access"
         ordering = ["-accessed_at"]
-        indexes = [
-            models.Index(fields=["media_house"]),
-            models.Index(fields=["incident"]),
-        ]
 
     def __str__(self):
         return f"{self.media_house.organization_name} - {self.access_type}"

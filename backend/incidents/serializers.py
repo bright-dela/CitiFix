@@ -5,7 +5,9 @@ from .utils import get_location_details, calculate_distance
 
 
 class IncidentSerializer(serializers.ModelSerializer):
-    reporter_name = serializers.CharField(source="reporter.user.full_name", read_only=True)
+    reporter_name = serializers.CharField(
+        source="reporter.user.full_name", read_only=True
+    )
     verified_by_name = serializers.CharField(
         source="verified_by.organization_name", read_only=True
     )
@@ -54,13 +56,19 @@ class IncidentSerializer(serializers.ModelSerializer):
         return None
 
 
-
-
 class AssignmentSerializer(serializers.ModelSerializer):
-    incident_type = serializers.CharField(source="incident.incident_type", read_only=True)
-    authority_name = serializers.CharField(source="authority.organization_name", read_only=True)
-    assigned_by_name = serializers.CharField(source="assigned_by.full_name", read_only=True)
-    distance_km = serializers.DecimalField(max_digits=6, decimal_places=2, read_only=True)
+    incident_type = serializers.CharField(
+        source="incident.incident_type", read_only=True
+    )
+    authority_name = serializers.CharField(
+        source="authority.organization_name", read_only=True
+    )
+    assigned_by_name = serializers.CharField(
+        source="assigned_by.full_name", read_only=True
+    )
+    distance_km = serializers.DecimalField(
+        max_digits=6, decimal_places=2, read_only=True
+    )
 
     class Meta:
         model = Assignment
@@ -91,10 +99,10 @@ class AssignmentSerializer(serializers.ModelSerializer):
         ]
 
 
-
-
 class IncidentUpdateSerializer(serializers.ModelSerializer):
-    updated_by_name = serializers.CharField(source="updated_by.full_name", read_only=True)
+    updated_by_name = serializers.CharField(
+        source="updated_by.full_name", read_only=True
+    )
 
     class Meta:
         model = IncidentUpdate
@@ -112,10 +120,10 @@ class IncidentUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_by", "updated_by_name"]
 
 
-
-
 class IncidentMediaSerializer(serializers.ModelSerializer):
-    incident_type = serializers.CharField(source="incident.incident_type", read_only=True)
+    incident_type = serializers.CharField(
+        source="incident.incident_type", read_only=True
+    )
     file_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -140,23 +148,8 @@ class IncidentMediaSerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(obj.file.url) if request else obj.file.url
 
 
-
 class MediaAccessSerializer(serializers.ModelSerializer):
-    media_house_name = serializers.CharField(
-        source="media_house.organization_name", read_only=True
-    )
-    incident_type = serializers.CharField(source="incident.incident_type", read_only=True)
-
     class Meta:
         model = MediaAccess
-        fields = [
-            "id",
-            "media_house",
-            "media_house_name",
-            "incident",
-            "incident_type",
-            "media_file",
-            "access_type",
-            "accessed_at",
-        ]
-        read_only_fields = ["accessed_at"]
+        fields = ["id", "media_house", "incident", "access_type", "accessed_at"]
+        read_only_fields = ["id", "accessed_at"]

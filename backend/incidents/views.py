@@ -23,6 +23,7 @@ class IncidentViewSet(viewsets.ModelViewSet):
     Handles all incident-related CRUD operations.
     Automatically assigns the nearest authority and triggers notifications.
     """
+
     queryset = Incident.objects.all().select_related("reporter", "verified_by")
     serializer_class = IncidentSerializer
     permission_classes = [IsAuthenticated]
@@ -118,7 +119,9 @@ class IncidentViewSet(viewsets.ModelViewSet):
                     notification_type="incident_verified",
                 )
 
-        return Response({"detail": "Incident verified successfully."}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": "Incident verified successfully."}, status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
@@ -148,7 +151,9 @@ class IncidentViewSet(viewsets.ModelViewSet):
                     notification_type="incident_resolved",
                 )
 
-        return Response({"detail": "Incident marked as resolved."}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": "Incident marked as resolved."}, status=status.HTTP_200_OK
+        )
 
 
 class AssignmentViewSet(viewsets.ModelViewSet):
@@ -176,7 +181,10 @@ class AssignmentViewSet(viewsets.ModelViewSet):
                 message=f"Assignment status updated to {new_status}.",
             )
 
-        return Response({"detail": f"Assignment updated to {new_status}."}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": f"Assignment updated to {new_status}."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class IncidentMediaViewSet(viewsets.ModelViewSet):
@@ -191,7 +199,56 @@ class IncidentUpdateViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-class MediaAccessViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = MediaAccess.objects.select_related("incident", "media_house")
+class MediaAccessViewSet(viewsets.ModelViewSet):
+    """Allow approved media houses to access verified incidents."""
+
     serializer_class = MediaAccessSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, "media_profile"):
+            return MediaAccess.objects.filter(media_house=user.media_profile)
+        return MediaAccess.objects.none()
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        user = request.user
+
+        # Ensure the user is a verified media house
+        if not hasattr(user, "media_profile"):
+            return Response(
+                {"detail": "You must be a registered media house."}, status=403
+            )
+
+        media_profile = user.media_profile
+        if media_profile.approval_status != "approved":
+            return Response({"detail": "Your account is not yet approved."}, status=403)
+
+        incident_id = request.data.get("incident")
+        access_type = request.data.get("access_type")
+
+        if not incident_id:
+            return Response({"detail": "Incident ID is required."}, status=400)
+
+        try:
+            incident = Incident.objects.get(id=incident_id, status="verified")
+        except Incident.DoesNotExist:
+            return Response(
+                {"detail": "Incident not found or not verified."}, status=404
+            )
+
+        # Restrict download access to premium users
+        if access_type == "download" and media_profile.subscription_tier != "premium":
+            return Response(
+                {"detail": "Download access is for premium members only."}, status=403
+            )
+
+        access = MediaAccess.objects.create(
+            media_house=media_profile,
+            incident=incident,
+            access_type=access_type,
+        )
+
+        serializer = self.get_serializer(access)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
