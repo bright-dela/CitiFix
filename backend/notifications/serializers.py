@@ -3,11 +3,14 @@ from .models import Notification
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    """Serializer for notifications"""
-    
     class Meta:
         model = Notification
         fields = [
-            'id', 'notification_type', 'title', 'message', 
-            'priority', 'is_read', 'created_at', 'read_at'
+            "id",
+            "title",
+            "message",
+            "notification_type",
+            "is_read",
+            "created_at",
         ]
+        read_only_fields = ["id", "created_at"]

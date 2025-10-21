@@ -1,50 +1,47 @@
-import jwt
-from django.conf import settings
-from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.tokens import AccessToken
 from urllib.parse import parse_qs
+from rest_framework_simplejwt.tokens import UntypedToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model
+from channels.db import database_sync_to_async
+from channels.middleware import BaseMiddleware
+from jwt import decode as jwt_decode
+from django.conf import settings
 
 User = get_user_model()
 
 
-class JWTAuthMiddleware:
-    """
-    Custom middleware that authenticates WebSocket connections using JWT tokens.
-    Token is expected in the query string as ?token=<JWT>
-    """
+@database_sync_to_async
+def get_user(validated_token):
+    """Fetch authenticated user from validated token payload."""
+    try:
+        user_id = validated_token["user_id"]
+        return User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return AnonymousUser()
 
-    def __init__(self, inner):
-        self.inner = inner
+
+class JWTAuthMiddleware(BaseMiddleware):
+    """Authenticate WebSocket connections using JWT token."""
 
     async def __call__(self, scope, receive, send):
-        # Parse the token from the query string
         query_params = parse_qs(scope["query_string"].decode())
         token = query_params.get("token", [None])[0]
 
-        scope["user"] = None
-
         if token:
             try:
-                validated_token = AccessToken(token)
-                user_id = validated_token.get("user_id")
-                user = await self.get_user(user_id)
-                scope["user"] = user
-            except Exception as e:
-                print("JWTAuthMiddleware error:", str(e))
-                scope["user"] = None
+                validated_token = UntypedToken(token)
+                decoded = jwt_decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+                scope["user"] = await get_user(decoded)
+            except (InvalidToken, TokenError):
+                scope["user"] = AnonymousUser()
+        else:
+            scope["user"] = AnonymousUser()
 
-        return await self.inner(scope, receive, send)
-
-    @staticmethod
-    async def get_user(user_id):
-        try:
-            return await User.objects.aget(pk=user_id)
-        except User.DoesNotExist:
-            return None
+        return await super().__call__(scope, receive, send)
 
 
 def JWTAuthMiddlewareStack(inner):
-    """Helper to combine our middleware with Django's AuthMiddlewareStack"""
+    """Shortcut to use JWTAuthMiddleware with Channels AuthMiddlewareStack."""
     from channels.auth import AuthMiddlewareStack
-
     return JWTAuthMiddleware(AuthMiddlewareStack(inner))
