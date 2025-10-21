@@ -1,135 +1,129 @@
-from django.utils import timezone
-from rest_framework import generics, status
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import User, CitizenProfile, AuthorityProfile, MediaHouseProfile
+from .models import AuthorityProfile, MediaHouseProfile
 from .serializers import (
     CitizenRegistrationSerializer,
     AuthorityRegistrationSerializer,
     MediaHouseRegistrationSerializer,
     CustomTokenObtainPairSerializer,
-    CitizenProfileSerializer,
-    AuthorityProfileSerializer,
-    MediaHouseProfileSerializer,
+    UserProfileUpdateSerializer,
+    AuthorityApprovalSerializer,
+    MediaApprovalSerializer,
 )
 
 
-class CustomTokenObtainPairView(TokenObtainPairView):
-    permission_classes = [AllowAny]
-    serializer_class = CustomTokenObtainPairSerializer
-
-
 class CitizenRegistrationView(generics.CreateAPIView):
-    permission_classes = [AllowAny]
     serializer_class = CitizenRegistrationSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(
+            {"message": "Registration successful."}, status=status.HTTP_201_CREATED
+        )
 
 
 class AuthorityRegistrationView(generics.CreateAPIView):
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.AllowAny]
     serializer_class = AuthorityRegistrationSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(
+            {"message": "Registration successful. Awaiting admin approval."},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MediaHouseRegistrationView(generics.CreateAPIView):
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.AllowAny]
     serializer_class = MediaHouseRegistrationSerializer
 
-
-class CitizenProfileView(generics.RetrieveUpdateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = CitizenProfileSerializer
-
-    def get_object(self):
-        user = self.request.user
-        if user.user_type != "citizen":
-            raise PermissionDenied("You are not authorized to access this profile.")
-        try:
-            return user.citizen_profile
-        except CitizenProfile.DoesNotExist:
-            raise NotFound("Citizen profile not found.")
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(
+            {"message": "Registration successful. Awaiting admin approval."},
+            status=status.HTTP_201_CREATED,
+        )
 
 
-class AuthorityProfileView(generics.RetrieveUpdateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = AuthorityProfileSerializer
+class UserProfileUpdateView(generics.RetrieveUpdateAPIView):
+    """
+    Allows logged-in users to view or update their own profile.
+    """
 
-    def get_object(self):
-        user = self.request.user
-        if user.user_type != "authority":
-            raise PermissionDenied("You are not authorized to access this profile.")
-        try:
-            return user.authority_profile
-        except AuthorityProfile.DoesNotExist:
-            raise NotFound("Authority profile not found.")
-
-
-class MediaHouseProfileView(generics.RetrieveUpdateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MediaHouseProfileSerializer
+    serializer_class = UserProfileUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
-        user = self.request.user
-        if user.user_type != "media":
-            raise PermissionDenied("You are not authorized to access this profile.")
-        try:
-            return user.media_profile
-        except MediaHouseProfile.DoesNotExist:
-            raise NotFound("Media profile not found.")
+        return self.request.user
 
 
-class PendingApprovalsView(generics.ListAPIView):
+class UserProfileView(APIView):
+    """
+    Fetch the current user's profile and related info.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserProfileUpdateSerializer(request.user)
+        return Response(serializer.data)
+
+
+class UserProfileUpdateView(APIView):
+    """
+    Update the current user's profile.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def put(self, request):
+        serializer = UserProfileUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        return self.put(request)
+    
+
+class IsAdminUser(permissions.BasePermission):
+    """Custom permission for admin-only access."""
+    def has_permission(self, request, view):
+        return request.user and request.user.is_staff
+
+
+class AuthorityApprovalView(generics.RetrieveUpdateAPIView):
+    """Admin can view detailed info and approve/reject an authority profile."""
+    queryset = AuthorityProfile.objects.all()
+    serializer_class = AuthorityApprovalSerializer
     permission_classes = [IsAdminUser]
 
-    def list(self, request, *args, **kwargs):
-        authorities = AuthorityProfile.objects.filter(approval_status="pending")
-        media_houses = MediaHouseProfile.objects.filter(approval_status="pending")
 
-        data = {
-            "authorities": AuthorityProfileSerializer(authorities, many=True).data,
-            "media_houses": MediaHouseProfileSerializer(media_houses, many=True).data,
-        }
-        return Response(data, status=status.HTTP_200_OK)
-
-
-class BaseApprovalView(generics.UpdateAPIView):
+class MediaApprovalView(generics.RetrieveUpdateAPIView):
+    """Admin can view detailed info and approve/reject a media profile."""
+    queryset = MediaHouseProfile.objects.all()
+    serializer_class = MediaApprovalSerializer
     permission_classes = [IsAdminUser]
-    model = None
-    object_name = ""
-
-    def patch(self, request, object_id):
-        try:
-            instance = self.model.objects.get(id=object_id)
-        except self.model.DoesNotExist:
-            return Response({"error": f"{self.object_name} not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        action = request.data.get("action", "approve").lower()
-
-        if action == "approve":
-            instance.approval_status = "approved"
-            instance.approved_by = request.user
-            instance.approved_at = timezone.now()
-            instance.user.is_active = True
-            instance.user.save()
-            message = f"{self.object_name} approved successfully."
-        elif action == "reject":
-            instance.approval_status = "rejected"
-            instance.user.is_active = False
-            instance.user.save()
-            message = f"{self.object_name} rejected."
-        else:
-            return Response({"error": "Invalid action."}, status=status.HTTP_400_BAD_REQUEST)
-
-        instance.save()
-        return Response({"message": message}, status=status.HTTP_200_OK)
 
 
-class ApproveAuthorityView(BaseApprovalView):
-    model = AuthorityProfile
-    object_name = "Authority"
-
-
-class ApproveMediaHouseView(BaseApprovalView):
-    model = MediaHouseProfile
-    object_name = "Media house"
+class CustomTokenObtainPairView(TokenObtainPairView):
+    permission_classes = [permissions.AllowAny]
+    serializer_class = CustomTokenObtainPairSerializer

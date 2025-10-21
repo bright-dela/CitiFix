@@ -5,12 +5,14 @@ from .views import (
     CitizenRegistrationView,
     AuthorityRegistrationView,
     MediaHouseRegistrationView,
-    CitizenProfileView,
-    AuthorityProfileView,
-    MediaHouseProfileView,
-    PendingApprovalsView,
-    ApproveAuthorityView,
-    ApproveMediaHouseView,
+    UserProfileUpdateView,
+    UserProfileView,
+    # CitizenProfileView,
+    # AuthorityProfileView,
+    # MediaHouseProfileView,
+    # PendingApprovalsView,
+    # ApproveAuthorityView,
+    # ApproveMediaHouseView,
 )
 
 urlpatterns = [
@@ -24,12 +26,11 @@ urlpatterns = [
     path("register/media/", MediaHouseRegistrationView.as_view(), name="register-media"),
 
     # Profiles
-    path("profile/citizen/", CitizenProfileView.as_view(), name="citizen-profile"),
-    path("profile/authority/", AuthorityProfileView.as_view(), name="authority-profile"),
-    path("profile/media/", MediaHouseProfileView.as_view(), name="media-profile"),
+    path("profile/", UserProfileView.as_view(), name="user-profile"),
+    path("profile/update/", UserProfileUpdateView.as_view(), name="user-profile-update"),
 
-    # Admin Actions
-    path("admin/approvals/", PendingApprovalsView.as_view(), name="pending-approvals"),
-    path("admin/authority/<uuid:object_id>/", ApproveAuthorityView.as_view(), name="approve-authority"),
-    path("admin/media/<uuid:object_id>/", ApproveMediaHouseView.as_view(), name="approve-media"),
+#     # Admin Actions
+#     path("admin/approvals/", PendingApprovalsView.as_view(), name="pending-approvals"),
+#     path("admin/authority/<uuid:object_id>/", ApproveAuthorityView.as_view(), name="approve-authority"),
+#     path("admin/media/<uuid:object_id>/", ApproveMediaHouseView.as_view(), name="approve-media"),
 ]
