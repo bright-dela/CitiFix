@@ -46,8 +46,9 @@ INSTALLED_APPS = [
     "channels",
     # Our custom apps
     "users",
-    "incidents",
+    "reports",
     "notifications",
+    "common"
 ]
 
 MIDDLEWARE = [

@@ -1,254 +1,183 @@
-from rest_framework import viewsets, status
-from rest_framework.response import Response
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
+from rest_framework.response import Response
+from django.db.models import Q
 from django.utils import timezone
+from .models import Report, ReportActionLog, MediaAttachment
+from .serializers import ReportSerializer, CreateReportSerializer
+from apps.notifications.services import NotificationService
 
-from .models import Incident, Assignment, IncidentMedia, IncidentUpdate, MediaAccess
-from .serializers import (
-    IncidentSerializer,
-    AssignmentSerializer,
-    IncidentMediaSerializer,
-    IncidentUpdateSerializer,
-    MediaAccessSerializer,
-)
-from .utils import auto_assign_incident, get_location_details, calculate_distance
-from users.models import AuthorityProfile
-from notifications.utils import create_and_send_notification
-
-
-class IncidentViewSet(viewsets.ModelViewSet):
-    """
-    Handles all incident-related CRUD operations.
-    Automatically assigns the nearest authority and triggers notifications.
-    """
-
-    queryset = Incident.objects.all().select_related("reporter", "verified_by")
-    serializer_class = IncidentSerializer
-    permission_classes = [IsAuthenticated]
-
-    def perform_create(self, serializer):
-        """Auto-populate address & assign nearest authority atomically."""
-        with transaction.atomic():
-            incident = serializer.save()
-
-            # Auto-fill address info from coordinates
-            if incident.location_latitude and incident.location_longitude:
-                details = get_location_details(
-                    incident.location_latitude, incident.location_longitude
-                )
-                if details:
-                    incident.location_address = details.get("address", "")
-                    incident.district = details.get("district", "")
-                    incident.region = details.get("region", "")
-                    incident.save(
-                        update_fields=["location_address", "district", "region"]
-                    )
-
-            # Auto assign nearest authority
-            assigned_authority = auto_assign_incident(incident)
-            if assigned_authority:
-                Assignment.objects.create(
-                    incident=incident,
-                    authority=assigned_authority,
-                    assigned_by=incident.reporter.user if incident.reporter else None,
-                    distance_km=calculate_distance(
-                        incident.location_latitude,
-                        incident.location_longitude,
-                        assigned_authority.station_latitude,
-                        assigned_authority.station_longitude,
-                    ),
-                )
-
-                # Notify assigned authority
-                create_and_send_notification(
-                    recipient=assigned_authority.user,
-                    title="New Incident Assigned",
-                    message=f"A new {incident.get_incident_type_display()} has been reported near your area.",
-                    notification_type="incident_assigned",
-                )
-
-            else:
-                # No authority found — notify reporter that incident is pending
-                if incident.reporter and incident.reporter.user:
-                    create_and_send_notification(
-                        recipient=incident.reporter.user,
-                        title="Incident Pending Assignment",
-                        message="Your report has been received and is awaiting assignment to an authority.",
-                        notification_type="incident_pending_assignment",
-                    )
-
-            # Notify reporter (confirmation)
-            if incident.reporter and incident.reporter.user:
-                create_and_send_notification(
-                    recipient=incident.reporter.user,
-                    title="Incident Report Submitted",
-                    message=f"Your report on {incident.get_incident_type_display()} has been received.",
-                    notification_type="incident_reported",
-                )
-
-    @action(detail=True, methods=["post"])
-    def verify(self, request, pk=None):
-        """Authority verifies an incident."""
-        incident = self.get_object()
-        authority = request.user.authorityprofile
-
-        with transaction.atomic():
-            incident.status = "verified"
-            incident.verified_by = authority
-            incident.verified_at = timezone.now()
-            incident.save(update_fields=["status", "verified_by", "verified_at"])
-            incident.update_reporter_stats(verified=True)
-
-            IncidentUpdate.objects.create(
-                incident=incident,
-                updated_by=request.user,
-                update_type="verification",
-                old_status="pending",
-                new_status="verified",
-                message="Incident verified by authority.",
-            )
-
-            # Notify reporter
-            if incident.reporter and incident.reporter.user:
-                create_and_send_notification(
-                    recipient=incident.reporter.user,
-                    title="Incident Verified",
-                    message="Your reported incident has been verified by authorities.",
-                    notification_type="incident_verified",
-                )
-
-        return Response(
-            {"detail": "Incident verified successfully."}, status=status.HTTP_200_OK
-        )
-
-    @action(detail=True, methods=["post"])
-    def resolve(self, request, pk=None):
-        """Mark an incident as resolved."""
-        incident = self.get_object()
-        with transaction.atomic():
-            old_status = incident.status
-            incident.status = "resolved"
-            incident.resolved_at = timezone.now()
-            incident.save(update_fields=["status", "resolved_at"])
-
-            IncidentUpdate.objects.create(
-                incident=incident,
-                updated_by=request.user,
-                update_type="status_change",
-                old_status=old_status,
-                new_status="resolved",
-                message="Incident resolved.",
-            )
-
-            # Notify reporter
-            if incident.reporter and incident.reporter.user:
-                create_and_send_notification(
-                    recipient=incident.reporter.user,
-                    title="Incident Resolved",
-                    message="Your reported incident has been marked as resolved.",
-                    notification_type="incident_resolved",
-                )
-
-        return Response(
-            {"detail": "Incident marked as resolved."}, status=status.HTTP_200_OK
-        )
-
-
-class AssignmentViewSet(viewsets.ModelViewSet):
-    queryset = Assignment.objects.select_related("incident", "authority", "assigned_by")
-    serializer_class = AssignmentSerializer
-    permission_classes = [IsAuthenticated]
-
-    @action(detail=True, methods=["post"])
-    def update_status(self, request, pk=None):
-        """Allow authority to update their assignment status."""
-        assignment = self.get_object()
-        new_status = request.data.get("status")
-
-        with transaction.atomic():
-            old_status = assignment.status
-            assignment.status = new_status
-            assignment.save(update_fields=["status", "updated_at"])
-
-            IncidentUpdate.objects.create(
-                incident=assignment.incident,
-                updated_by=request.user,
-                update_type="assignment",
-                old_status=old_status,
-                new_status=new_status,
-                message=f"Assignment status updated to {new_status}.",
-            )
-
-        return Response(
-            {"detail": f"Assignment updated to {new_status}."},
-            status=status.HTTP_200_OK,
-        )
-
-
-class IncidentMediaViewSet(viewsets.ModelViewSet):
-    queryset = IncidentMedia.objects.select_related("incident")
-    serializer_class = IncidentMediaSerializer
-    permission_classes = [IsAuthenticated]
-
-
-class IncidentUpdateViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = IncidentUpdate.objects.select_related("incident", "updated_by")
-    serializer_class = IncidentUpdateSerializer
-    permission_classes = [IsAuthenticated]
-
-
-class MediaAccessViewSet(viewsets.ModelViewSet):
-    """Allow approved media houses to access verified incidents."""
-
-    serializer_class = MediaAccessSerializer
-    permission_classes = [IsAuthenticated]
+class ReportViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CreateReportSerializer
+        return ReportSerializer
 
     def get_queryset(self):
         user = self.request.user
-        if hasattr(user, "media_profile"):
-            return MediaAccess.objects.filter(media_house=user.media_profile)
-        return MediaAccess.objects.none()
-
-    @transaction.atomic
-    def create(self, request, *args, **kwargs):
-        user = request.user
-
-        # Ensure the user is a verified media house
-        if not hasattr(user, "media_profile"):
-            return Response(
-                {"detail": "You must be a registered media house."}, status=403
+        queryset = Report.objects.select_related('reporter', 'assigned_to').prefetch_related('media_attachments', 'action_logs')
+        
+        # Media houses can only see public reports
+        if user.user_type == 'media_house':
+            queryset = queryset.filter(visibility='public')
+        # Authorities see public reports and those assigned to them
+        elif user.user_type == 'authority':
+            queryset = queryset.filter(
+                Q(visibility='public') | Q(assigned_to=user)
             )
-
-        media_profile = user.media_profile
-        if media_profile.approval_status != "approved":
-            return Response({"detail": "Your account is not yet approved."}, status=403)
-
-        incident_id = request.data.get("incident")
-        access_type = request.data.get("access_type")
-
-        if not incident_id:
-            return Response({"detail": "Incident ID is required."}, status=400)
-
-        try:
-            incident = Incident.objects.get(id=incident_id, status="verified")
-        except Incident.DoesNotExist:
-            return Response(
-                {"detail": "Incident not found or not verified."}, status=404
+        # Citizens only see their own reports
+        elif user.user_type == 'citizen':
+            queryset = queryset.filter(reporter=user)
+        # Superadmin sees all
+        
+        # Apply filters
+        status_filter = self.request.query_params.get('status')
+        severity = self.request.query_params.get('severity')
+        report_type = self.request.query_params.get('report_type')
+        search = self.request.query_params.get('search')
+        
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        if severity:
+            queryset = queryset.filter(severity=severity)
+        if report_type:
+            queryset = queryset.filter(report_type=report_type)
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) | 
+                Q(description__icontains=search)
             )
+        
+        return queryset
 
-        # Restrict download access to premium users
-        if access_type == "download" and media_profile.subscription_tier != "premium":
-            return Response(
-                {"detail": "Download access is for premium members only."}, status=403
-            )
-
-        access = MediaAccess.objects.create(
-            media_house=media_profile,
-            incident=incident,
-            access_type=access_type,
+    def perform_create(self, serializer):
+        report = serializer.save(reporter=self.request.user)
+        
+        # Create initial action log
+        ReportActionLog.objects.create(
+            report=report,
+            actor=self.request.user,
+            action_type='status_change',
+            description=f'Report created with status: {report.status}'
         )
+        
+        # Send real-time notification
+        NotificationService.send_new_report_notification(report)
 
-        serializer = self.get_serializer(access)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    @action(detail=False, methods=['get'])
+    def my_reports(self, request):
+        if request.user.user_type != 'citizen':
+            return Response({'error': 'Only citizens can access this'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        reports = self.get_queryset().filter(reporter=request.user)
+        page = self.paginate_queryset(reports)
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(reports, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def assigned_to_me(self, request):
+        if request.user.user_type != 'authority':
+            return Response({'error': 'Only authorities can access this'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        reports = self.get_queryset().filter(assigned_to=request.user)
+        page = self.paginate_queryset(reports)
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(reports, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['patch'])
+    def update_status(self, request, pk=None):
+        report = self.get_object()
+        new_status = request.data.get('status')
+        
+        if not new_status:
+            return Response({'error': 'Status is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if new_status not in dict(Report.STATUS_CHOICES):
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        old_status = report.status
+        report.status = new_status
+        
+        if new_status == 'resolved':
+            report.resolved_at = timezone.now()
+        
+        report.save()
+        
+        # Create action log
+        ReportActionLog.objects.create(
+            report=report,
+            actor=request.user,
+            action_type='status_change',
+            description=f'Status changed from {old_status} to {new_status}'
+        )
+        
+        # Send real-time update
+        NotificationService.send_report_update(report.id, report.reporter.id)
+        
+        serializer = self.get_serializer(report)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def add_note(self, request, pk=None):
+        report = self.get_object()
+        note = request.data.get('note')
+        
+        if not note:
+            return Response({'error': 'Note is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        action_log = ReportActionLog.objects.create(
+            report=report,
+            actor=request.user,
+            action_type='note_added',
+            description=note
+        )
+        
+        serializer = ReportActionLogSerializer(action_log)
+        return Response(serializer.data)
+
+@action(detail=True, methods=['patch'])
+def assign_report(self, request, pk=None):
+    report = self.get_object()
+    authority_id = request.data.get('authority_id')
+    
+    if authority_id:
+        from apps.users.models import User
+        try:
+            authority = User.objects.get(id=authority_id, user_type='authority', status='active')
+        except User.DoesNotExist:
+            return Response({'error': 'Authority not found'}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        authority = request.user
+    
+    report.assigned_to = authority
+    report.assigned_at = timezone.now()
+    report.status = 'assigned'
+    report.save()
+    
+    # Create action log
+    ReportActionLog.objects.create(
+        report=report,
+        actor=request.user,
+        action_type='assignment',
+        description=f'Report assigned to {authority.email}'
+    )
+    
+    # Send real-time update
+    NotificationService.send_report_update(report.id, authority.id)
+    
+    serializer = self.get_serializer(report)
+    return Response(serializer.data)

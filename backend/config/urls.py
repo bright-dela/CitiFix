@@ -21,16 +21,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    
-    # API Version 1 endpoints
-    path("api/", include("users.urls")),
-    path("api/", include("incidents.urls")),
-    path("api/", include("notifications.urls")),
+    path('admin/', admin.site.urls),
+    path('api/v1/auth/', include('apps.users.urls')),
+    path('api/v1/reports/', include('apps.reports.urls')),
+    path('api/v1/documents/', include('apps.users.document_urls')),
+    path('api/v1/admin/', include('apps.users.admin_urls')),
 ]
 
-
-# Serve media and static files in development mode
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
