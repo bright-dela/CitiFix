@@ -5,7 +5,7 @@ from django.db.models import Q
 from django.utils import timezone
 from .models import Report, ReportActionLog, MediaAttachment
 from .serializers import ReportSerializer, CreateReportSerializer
-from apps.notifications.services import NotificationService
+from notifications.services import NotificationService
 
 class ReportViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]

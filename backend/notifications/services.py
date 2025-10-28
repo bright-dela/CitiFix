@@ -1,7 +1,7 @@
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from apps.reports.models import Report
-from apps.reports.serializers import ReportSerializer
+from reports.models import Report
+from reports.serializers import ReportSerializer
 from django.utils import timezone
 import time
 
@@ -25,7 +25,7 @@ class NotificationService:
             
             # Send to all authorities for critical reports
             if report.severity == 'critical':
-                from apps.users.models import User
+                from users.models import User
                 authorities = User.objects.filter(user_type='authority', status='active')
                 for authority in authorities:
                     async_to_sync(channel_layer.group_send)(
@@ -50,7 +50,7 @@ class NotificationService:
         channel_layer = get_channel_layer()
         
         # Notify superadmins
-        from apps.users.models import User
+        from users.models import User
         superadmins = User.objects.filter(user_type='superadmin', status='active')
         
         for admin in superadmins:
